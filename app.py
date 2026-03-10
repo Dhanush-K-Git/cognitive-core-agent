@@ -6,13 +6,50 @@ st.set_page_config(page_title="Cognitive Core Agent", page_icon="🔍", layout="
 st.title("Cognitive Core Agent")
 st.markdown("Ask a complex question, and I will autonomously plan, research, and write a comprehensive report.")
 
-# 2. Initialize Chat Memory (Session State)
-# We use session_state so the app doesn't forget the chat history when it refreshes.
-if "messages" not in st.session_state:
-    st.session_state.messages = []
+# 2. Memory Manager Sidebar
+with st.sidebar:
+    st.header("📂 Session Manager")
+    st.write("Type a session name to load past research.")
+    session_id = st.text_input("Session ID:", value="default_session")
 
-# 3. Display Chat History
-# This loops through past messages and displays them on the screen.
+# Lock in the config for LangGraph
+config = {"configurable": {"thread_id": session_id}}
+
+# 3. Sync Streamlit Memory with SQLite (THE UPGRADE)
+if "current_session" not in st.session_state or st.session_state.current_session != session_id:
+    st.session_state.current_session = session_id
+    st.session_state.messages = []
+    
+    try:
+        # 🚀 Fetch the ENTIRE history of this session from the SQLite Checkpointer
+        # get_state_history returns newest to oldest, so we reverse it to draw top-to-bottom
+        state_history = list(agent_app.get_state_history(config))
+        state_history.reverse()
+        
+        seen_reports = set() # To prevent drawing duplicate bubbles
+        
+        for state in state_history:
+            vals = state.values
+            # We only want to draw states where the agent actually finished its report
+            if "final_report" in vals and vals["final_report"] and vals["final_report"] not in seen_reports:
+                
+                # Extract the clean prompt (removes the "Previous Chat History" injection)
+                raw_task = vals.get("task", "")
+                if "User's New Request:" in raw_task:
+                    clean_prompt = raw_task.split("User's New Request:")[-1].strip()
+                else:
+                    clean_prompt = raw_task.strip()
+                    
+                # Add the chat bubbles back to Streamlit's visual memory!
+                st.session_state.messages.append({"role": "user", "content": clean_prompt})
+                st.session_state.messages.append({"role": "assistant", "content": vals["final_report"]})
+                
+                seen_reports.add(vals["final_report"])
+    except Exception as e:
+        # If it's a brand new session and errors out, just ignore and start fresh
+        pass
+
+# 4. Display Chat History on the Screen
 for message in st.session_state.messages:
     with st.chat_message(message["role"]):
         st.markdown(message["content"])
@@ -46,7 +83,6 @@ if prompt := st.chat_input("What would you like me to research?"):
                 "final_report": ""
             }
             
-            config = {"configurable": {"thread_id": "client_session_1"}}
             result = agent_app.invoke(initial_state, config=config)
             final_answer = result["final_report"]
             

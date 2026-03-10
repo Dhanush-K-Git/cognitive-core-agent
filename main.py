@@ -1,6 +1,8 @@
 import os
 from dotenv import load_dotenv
 from langgraph.graph import StateGraph, START, END
+import sqlite3
+from langgraph.checkpoint.sqlite import SqliteSaver
 
 # Import the files YOU built!
 from state import AgentState
@@ -26,8 +28,10 @@ workflow.add_edge("planner", "researcher")   # Manager passes plan to Worker
 workflow.add_edge("researcher", "writer")    # Worker passes notes to Editor
 workflow.add_edge("writer", END)             # Editor finishes the job
 
-# 5. Compile the Graph into a runnable application
-app = workflow.compile()
+# 5. Compile the Graph with SQLite Memory Checkpointer
+conn = sqlite3.connect("checkpoints.sqlite", check_same_thread=False)
+memory = SqliteSaver(conn)
+app = workflow.compile(checkpointer=memory)
 
 # --- RUN THE APP ---
 if __name__ == "__main__":
